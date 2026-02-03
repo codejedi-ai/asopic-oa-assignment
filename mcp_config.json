@@ -1,0 +1,13 @@
+{
+    "mcpServers": {
+        "github-navigator": {
+            "command": "python",
+            "args": [
+                "c:\\Users\\Administrator\\Dropbox\\aesopic-OA\\mcp_server.py"
+            ],
+            "env": {
+                "PYTHONPATH": "c:\\Users\\Administrator\\Dropbox\\aesopic-OA\\.venv\\Lib\\site-packages"
+            }
+        }
+    }
+}
