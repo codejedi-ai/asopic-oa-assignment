@@ -1,0 +1,24 @@
+{
+  "name": "ice-something",
+  "version": "1.0.0",
+  "description": "Cyber Realm - ice.js Application",
+  "private": true,
+  "scripts": {
+    "start": "ice start --speedup",
+    "build": "ice build"
+  },
+  "dependencies": {
+    "@ice/runtime": "^1.4.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "zod": "^3.22.4",
+    "zod-validation-error": "^2.1.0"
+  },
+  "devDependencies": {
+    "@ice/app": "^3.4.0",
+    "@types/node": "^18.11.17",
+    "@types/react": "^18.0.0",
+    "@types/react-dom": "^18.0.0",
+    "typescript": "^4.9.5"
+  }
+}
