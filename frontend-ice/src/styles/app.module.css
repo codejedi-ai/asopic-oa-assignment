@@ -25,15 +25,16 @@
   z-index: 10;
   flex-shrink: 0;
   box-shadow: 4px 0 15px rgba(0, 0, 0, 0.6);
+  position: relative;
 }
 
 .sidebarOpen { transform: translateX(0); }
 .sidebarClosed { margin-left: -260px; transform: translateX(-260px); }
 
-.sidebarHeader { display: flex; align-items: center; gap: 0.8rem; padding: 1rem; border-bottom: 1px solid rgba(189, 147, 249, 0.2); }
+.sidebarHeader { display:flex; align-items:center; gap:0.8rem; padding:1rem; border-bottom:1px solid rgba(189, 147, 249, 0.2); }
 .sidebarLogo { height: 28px; filter: drop-shadow(0 0 4px rgba(0,255,255,0.6)); }
 .sidebarTitle { margin:0; font-size:1.05rem; font-weight:700; background:linear-gradient(45deg,#00ffff,#bd93f9); -webkit-background-clip:text; -webkit-text-fill-color:transparent; flex-grow:1; }
-.toggleBtn { background:transparent; border:none; color:#bd93f9; cursor:pointer; padding:0.2rem; font-size:0.9rem; transition:color .3s; }
+.toggleBtn { position:absolute; right:8px; top:50%; transform: translateY(-50%); background:transparent; border:none; color:#bd93f9; cursor:pointer; padding:0.2rem; font-size:0.9rem; transition:color .3s; z-index:11; }
 .toggleBtn:hover { color:#00ffff; }
 
 /* Sidebar navigation */
