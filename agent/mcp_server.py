@@ -18,6 +18,8 @@ from playwright.async_api import async_playwright, Browser, BrowserContext, Page
 # Import BeautifulSoup for cleaner DOM parsing
 from bs4 import BeautifulSoup
 
+import config
+
 
 class TabManager:
     """
@@ -131,7 +133,7 @@ async def initialize_browser():
 
     playwright_instance = await async_playwright().start()
     context = await playwright_instance.chromium.launch_persistent_context(
-        user_data_dir="browser_data",
+        user_data_dir=config.BROWSER_DATA_DIR,
         headless=False,
         viewport={'width': 1920, 'height': 1080},
         args=['--no-sandbox', '--disable-dev-shm-usage']
@@ -147,15 +149,30 @@ async def initialize_browser():
 
 
 async def cleanup_browser():
-    """Cleanup browser resources"""
-    global page, context, playwright_instance
+    """Cleanup browser resources and reset state so the channel can reopen later."""
+    global page, context, browser, playwright_instance, tab_manager
 
-    if page:
-        await page.close()
-    if context:
-        await context.close()
-    if playwright_instance:
-        await playwright_instance.stop()
+    try:
+        if page:
+            await page.close()
+    except Exception:
+        pass
+    try:
+        if context:
+            await context.close()
+    except Exception:
+        pass
+    try:
+        if playwright_instance:
+            await playwright_instance.stop()
+    except Exception:
+        pass
+
+    page = None
+    context = None
+    browser = None
+    playwright_instance = None
+    tab_manager = TabManager()
 
 
 # Create MCP server
@@ -598,8 +615,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
 
         elif name == "get_screenshot":
             full_page = arguments.get("full_page", False)
-            screenshot_path = Path("screenshots") / "mcp_screenshot.png"
-            screenshot_path.parent.mkdir(exist_ok=True)
+            screenshot_path = Path(config.SCREENSHOT_DIR) / "mcp_screenshot.png"
+            screenshot_path.parent.mkdir(parents=True, exist_ok=True)
 
             await page.screenshot(path=screenshot_path, full_page=full_page)
 
@@ -660,8 +677,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
             }
 
             if include_screenshot:
-                screenshot_path = Path("screenshots") / "mcp_state.png"
-                screenshot_path.parent.mkdir(exist_ok=True)
+                screenshot_path = Path(config.SCREENSHOT_DIR) / "mcp_state.png"
+                screenshot_path.parent.mkdir(parents=True, exist_ok=True)
                 await page.screenshot(path=screenshot_path, full_page=False)
 
                 with open(screenshot_path, "rb") as f:

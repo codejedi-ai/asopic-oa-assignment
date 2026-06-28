@@ -1,5 +1,4 @@
 import { useEffect, useRef } from 'react';
-import logo from '@/assets/logo.png';
 import { useAgent } from '@/context/AgentContext';
 import styles from '@/styles/app.module.css';
 
@@ -15,7 +14,6 @@ export default function ConsolePage() {
     <section className={styles.pagePanel}>
       <header className={styles.panelHeader}>
         <div className={styles.panelHeaderTitle}>
-          <img src={logo} className={styles.panelLogo} alt="Logo" />
           <h3>💻 REAL‑TIME CONSOLE LOGS</h3>
         </div>
         {isNavigating && <button className={styles.abortBtn} onClick={stopMission}>Abort</button>}

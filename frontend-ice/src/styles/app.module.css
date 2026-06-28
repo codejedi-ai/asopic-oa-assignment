@@ -15,8 +15,7 @@
 .sidebar {
   width: 260px;
   background: rgba(10, 5, 22, 0.6);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+
   border-right: 1px solid rgba(189, 147, 249, 0.2);
   display: flex;
   flex-direction: column;
@@ -32,9 +31,10 @@
 .sidebarClosed { margin-left: -260px; transform: translateX(-260px); }
 
 .sidebarHeader { display:flex; align-items:center; gap:0.8rem; padding:1rem; border-bottom:1px solid rgba(189, 147, 249, 0.2); }
+.sidebarBrand { display:flex; align-items:center; gap:0.8rem; flex-grow:1; text-decoration:none; cursor:pointer; min-width:0; }
 .sidebarLogo { height: 28px; filter: drop-shadow(0 0 4px rgba(0,255,255,0.6)); }
 .sidebarTitle { margin:0; font-size:1.05rem; font-weight:700; background:linear-gradient(45deg,#00ffff,#bd93f9); -webkit-background-clip:text; -webkit-text-fill-color:transparent; flex-grow:1; }
-.toggleBtn { position:absolute; right:8px; top:50%; transform: translateY(-50%); background:transparent; border:none; color:#bd93f9; cursor:pointer; padding:0.2rem; font-size:0.9rem; transition:color .3s; z-index:11; }
+.toggleBtn { position:absolute; right:8px; left:auto; top:50%; transform: translateY(-50%); background:transparent; border:none; color:#bd93f9; cursor:pointer; padding:0.2rem; font-size:0.9rem; transition:color .3s; z-index:11; }
 .toggleBtn:hover { color:#00ffff; }
 
 /* Sidebar navigation */
@@ -46,9 +46,7 @@
 .newMissionBtn { margin:0.8rem; background:rgba(189,147,249,0.12); border:1px dashed rgba(189,147,249,0.5); color:#bd93f9; padding:0.5rem; border-radius:6px; cursor:pointer; font-size:0.85rem; font-weight:600; transition:all .3s; }
 .newMissionBtn:hover { background:rgba(189,147,249,0.25); color:#fff; border-color:#00ffff; }
 
-.sidebarConnection { margin:0 0.8rem; padding:0.6rem; background:rgba(0,0,0,0.35); border-radius:6px; border:1px solid rgba(0,255,255,0.15); display:flex; flex-direction:column; gap:0.4rem; }
-.connectionDetails { display:flex; align-items:center; gap:0.4rem; }
-.connectionLabel { font-size:0.75rem; font-weight:600; }
+.connectionLabel { font-size:0.85rem; font-weight:600; }
 .connectBtn,.disconnectBtn { background:transparent; color:#00ffff; border:1px solid #00ffff; padding:0.25rem; border-radius:4px; cursor:pointer; font-size:0.7rem; transition:all .3s; width:100%; }
 .connectBtn:hover { background:rgba(0,255,255,0.15); }
 .disconnectBtn { color:#ff5555; border-color:#ff5555; }
@@ -57,15 +55,28 @@
 /* History */
 .historyList { flex-grow:1; overflow-y:auto; padding:0.8rem; display:flex; flex-direction:column; gap:0.4rem; }
 .historySectionTitle { font-size:0.7rem; text-transform:uppercase; color:#6272a4; letter-spacing:0.5px; margin-bottom:0.4rem; font-weight:600; }
-.historyItem { display:flex; justify-content:space-between; align-items:center; padding:0.5rem; background:rgba(255,255,255,0.02); border-radius:5px; cursor:pointer; font-size:0.8rem; transition:all .2s ease; border:1px solid transparent; }
+.historyItem { display:flex; justify-content:space-between; align-items:center; padding:0.5rem; background:rgba(255,255,255,0.02); border-radius:5px; cursor:pointer; font-size:0.8rem; transition:all .2s ease; border:1px solid transparent; text-decoration:none; color:inherit; }
 .historyItem:hover { background:rgba(189,147,249,0.08); border-color:rgba(189,147,249,0.25); }
 .activeHistoryItem { background:rgba(0,255,255,0.08); border-color:rgba(0,255,255,0.3); }
 .historyTitle { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex-grow:1; margin-right:0.4rem; }
 .historyStatus { font-size:0.75rem; }
 
-.sidebarConfig { padding:0.8rem; border-top:1px solid rgba(189,147,249,0.2); display:flex; flex-direction:column; gap:0.25rem; }
-.sidebarConfig label { font-size:0.65rem; color:#8be9fd; text-transform:uppercase; }
-.sidebarConfig input { background:rgba(0,0,0,0.4); border:1px solid rgba(189,147,249,0.3); color:#f8f8f2; padding:0.35rem; border-radius:4px; font-size:0.75rem; outline:none; }
+/* Settings button — pinned at sidebar bottom */
+.settingsBtn { display:flex; align-items:center; gap:0.6rem; margin:0.8rem; padding:0.65rem 0.8rem; background:rgba(189,147,249,0.08); border:1px solid rgba(189,147,249,0.25); border-radius:8px; color:#cdbcf0; text-decoration:none; font-size:0.85rem; font-weight:600; transition:all .25s ease; flex-shrink:0; }
+.settingsBtn:hover { background:rgba(0,255,255,0.1); color:#fff; border-color:rgba(0,255,255,0.35); }
+.settingsBtnLabel { flex-grow:1; text-align:left; }
+
+/* SETTINGS PAGE */
+.settingsBody { flex-grow:1; overflow-y:auto; display:flex; justify-content:center; padding:1rem 0; }
+.settingsCard { width:100%; max-width:480px; height:fit-content; background:rgba(0,0,0,0.35); border:1px solid rgba(0,255,255,0.15); border-radius:10px; padding:1.4rem; display:flex; flex-direction:column; gap:1rem; box-shadow:0 4px 20px rgba(0,0,0,0.4); }
+.settingsCardTitle { margin:0; font-size:0.95rem; color:#8be9fd; letter-spacing:0.5px; text-transform:uppercase; }
+.settingsRow { display:flex; align-items:center; gap:0.5rem; }
+.settingsField { display:flex; flex-direction:column; gap:0.4rem; }
+.settingsLabel { font-size:0.7rem; color:#8be9fd; text-transform:uppercase; letter-spacing:0.5px; }
+.settingsInput { background:rgba(0,0,0,0.45); border:1px solid rgba(189,147,249,0.3); color:#f8f8f2; padding:0.55rem 0.6rem; border-radius:6px; font-size:0.85rem; outline:none; transition:border-color .3s; }
+.settingsInput:focus { border-color:#00ffff; }
+.settingsInput:disabled { opacity:0.6; cursor:not-allowed; }
+.settingsHint { font-size:0.7rem; color:#ffb86c; }
 
 .sidebarTrigger { position:absolute; left:10px; top:50%; transform: translateY(-50%); background:rgba(12,6,26,0.7); border:1px solid rgba(0,255,255,0.3); color:#00ffff; padding:0.35rem 0.5rem; border-radius:5px; cursor:pointer; z-index:9; box-shadow:0 0 8px rgba(0,255,255,0.2); font-size:0.8rem; transition:all .3s; }
 .sidebarTrigger:hover { background:#00ffff; color:#000; box-shadow:0 0 12px #00ffff; }
@@ -74,12 +85,21 @@
 .pageMain { display:flex; flex:1; overflow:hidden; min-width:0; }
 
 /* SHARED PAGE TEMPLATE — every route uses the same panel shell + header */
-.pagePanel { flex:1 1 0; display:flex; flex-direction:column; background:rgba(8,4,18,0.45); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); padding:1.5rem; box-sizing:border-box; min-width:0; }
+.pagePanel { flex:1 1 0; display:flex; flex-direction:column; background:rgba(8,4,18,0.45); padding:1.5rem; box-sizing:border-box; min-width:0; }
 .panelHeader { display:flex; align-items:center; justify-content:space-between; gap:0.8rem; border-bottom:1px solid rgba(0,255,255,0.15); padding-bottom:0.6rem; margin-bottom:1rem; flex-shrink:0; }
 .panelHeaderTitle { display:flex; align-items:center; gap:0.7rem; min-width:0; }
 .panelLogo { height:28px; filter:drop-shadow(0 0 5px rgba(0,255,255,0.7)); flex-shrink:0; }
 .panelHeader h3 { margin:0; font-size:1.05rem; font-weight:700; letter-spacing:1px; background:linear-gradient(45deg,#00ffff,#bd93f9); -webkit-background-clip:text; -webkit-text-fill-color:transparent; white-space:nowrap; }
 .stepBadge { font-size:0.75rem; color:#05020a; background:linear-gradient(45deg,#bd93f9,#00ffff); padding:0.2rem 0.6rem; border-radius:10px; font-weight:700; flex-shrink:0; }
+
+/* Editable chat title */
+.chatHeaderIcon { font-size:1.05rem; flex-shrink:0; }
+.titleButton { display:flex; align-items:center; gap:0.4rem; background:transparent; border:none; cursor:pointer; padding:0; min-width:0; }
+.titleButton h3 { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:46vw; }
+.titleEdit { font-size:0.8rem; opacity:0.45; transition:opacity .2s; flex-shrink:0; }
+.titleButton:hover .titleEdit { opacity:1; }
+.titleInput { background:rgba(0,0,0,0.45); border:1px solid rgba(0,255,255,0.4); color:#f8f8f2; font-size:1.05rem; font-weight:700; padding:0.2rem 0.55rem; border-radius:6px; outline:none; min-width:240px; max-width:46vw; }
+.titleInput:focus { border-color:#00ffff; box-shadow:0 0 8px rgba(0,255,255,0.3); }
 
 /* CHAT BODY */
 .chatHistory { flex-grow:1; overflow-y:auto; display:flex; flex-direction:column; gap:1rem; padding:0.5rem; margin-bottom:1rem; min-height:0; }
@@ -93,6 +113,10 @@
 .agent .chatBubble { background:rgba(0,255,255,0.06); border-color:rgba(0,255,255,0.25); border-top-left-radius:2px; }
 .system .chatBubble { background:rgba(98,114,164,0.08); border-color:rgba(98,114,164,0.2); border-radius:8px; font-style:italic; }
 .chatText { margin:0; font-size:0.88rem; line-height:1.45; white-space:pre-wrap; }
+.chatScreenshot { margin-top:0.5rem; max-width:100%; border-radius:8px; border:1px solid rgba(0,255,255,0.25); box-shadow:0 2px 12px rgba(0,0,0,0.5); display:block; }
+.thoughtBubble { background:rgba(189,147,249,0.07) !important; border-color:rgba(189,147,249,0.25) !important; border-style:dashed !important; }
+.thoughtLabel { font-size:0.62rem; text-transform:uppercase; letter-spacing:0.5px; color:#bd93f9; font-weight:700; margin-bottom:0.2rem; }
+.thoughtBubble .chatText { font-style:italic; color:#cdbcf0; }
 .chatTime { font-size:0.65rem; color:#6272a4; align-self:flex-end; }
 .chatInputForm { display:flex; gap:0.8rem; background:rgba(0,0,0,0.65); border:1px solid rgba(0,255,255,0.25); border-radius:10px; padding:0.5rem 0.75rem; box-shadow:0 4px 15px rgba(0,0,0,0.5); transition:border-color .3s, box-shadow .3s; width:100%; max-width:800px; margin:0 auto; box-sizing:border-box; }
 .chatInputForm:focus-within { border-color:#00ffff; box-shadow:0 0 12px rgba(0,255,255,0.35); }
@@ -101,6 +125,8 @@
 .chatSendBtn { background:linear-gradient(45deg,#bd93f9,#00ffff); color:#05020a; border:none; font-weight:700; padding:0.35rem 1.1rem; border-radius:6px; cursor:pointer; transition:all .3s; }
 .chatSendBtn:hover:not(:disabled) { transform:translateY(-1px); box-shadow:0 0 8px rgba(0,255,255,0.5); }
 .chatSendBtn:disabled { background:#44475a; color:#6272a4; cursor:not-allowed; }
+.chatStopBtn { background:linear-gradient(45deg,#ff5555,#ff8888); color:#1a0000; border:none; font-weight:700; padding:0.35rem 1.1rem; border-radius:6px; cursor:pointer; transition:all .3s; white-space:nowrap; }
+.chatStopBtn:hover { transform:translateY(-1px); box-shadow:0 0 10px rgba(255,85,85,0.6); }
 
 /* VISION BODY */
 .viewportContainer { background:rgba(3,1,6,0.55); flex-grow:1; display:flex; align-items:center; justify-content:center; position:relative; overflow:hidden; border-radius:8px; border:1px solid rgba(189,147,249,0.25); box-shadow:0 4px 20px rgba(0,0,0,0.5); }

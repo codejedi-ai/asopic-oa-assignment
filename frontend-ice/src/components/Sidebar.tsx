@@ -1,10 +1,10 @@
-import { Link, useLocation } from 'ice';
+import { Link, useLocation, useNavigate } from 'ice';
 import logo from '@/assets/logo.png';
 import { useAgent } from '@/context/AgentContext';
 import styles from '@/styles/app.module.css';
 
 const NAV_ITEMS = [
-  { to: '/mission', label: '💬 Chat Assistant' },
+  { to: '/mission', label: 'Mission control' },
   { to: '/live-vision', label: '🖥️ Live Vision' },
   { to: '/console', label: '💻 Console Logs' },
 ];
@@ -12,14 +12,14 @@ const NAV_ITEMS = [
 export default function Sidebar() {
   const {
     sidebarOpen, setSidebarOpen,
-    agentUrl, setAgentUrl,
     wsStatus,
-    connectToAgent, disconnectFromAgent,
-    missions, selectedMissionId, loadHistoricalMission, startNewMission,
-    isNavigating,
+    missions, selectedMissionId,
   } = useAgent();
 
   const location = useLocation();
+  const navigate = useNavigate();
+
+  const handleNewMission = () => navigate('/mission');
 
   if (!sidebarOpen) {
     return <button className={styles.sidebarTrigger} onClick={() => setSidebarOpen(true)}>▶</button>;
@@ -28,8 +28,10 @@ export default function Sidebar() {
   return (
     <aside className={`${styles.sidebar} ${styles.sidebarOpen}`}>
       <div className={styles.sidebarHeader}>
-        <img src={logo} className={styles.sidebarLogo} alt="Logo" />
-        <h2 className={styles.sidebarTitle}>Gemini Control</h2>
+        <Link to="/mission" className={styles.sidebarBrand}>
+          <img src={logo} className={styles.sidebarLogo} alt="Logo" />
+          <h2 className={styles.sidebarTitle}>Mission control</h2>
+        </Link>
         <button className={styles.toggleBtn} onClick={() => setSidebarOpen(false)}>◀</button>
       </div>
 
@@ -49,48 +51,33 @@ export default function Sidebar() {
         })}
       </nav>
 
-      <button className={styles.newMissionBtn} onClick={startNewMission}>➕ New Mission</button>
+      <button className={styles.newMissionBtn} onClick={handleNewMission}>➕ New Mission</button>
 
-      {/* Connection */}
-      <div className={styles.sidebarConnection}>
-        <div className={styles.connectionDetails}>
-          <span className={`${styles.statusDot} ${styles[wsStatus]}`} />
-          <span className={styles.connectionLabel}>
-            {wsStatus === 'connected' && 'Agent Online'}
-            {wsStatus === 'connecting' && 'Connecting...'}
-            {wsStatus === 'disconnected' && 'Agent Offline'}
-            {wsStatus === 'error' && 'Error'}
-          </span>
-        </div>
-        {wsStatus !== 'connected' ? (
-          <button className={styles.connectBtn} onClick={connectToAgent}>Connect</button>
-        ) : (
-          <button className={styles.disconnectBtn} onClick={disconnectFromAgent}>Disconnect</button>
-        )}
-      </div>
-
-      {/* History */}
+      {/* History — each mission links to its own /mission/<uuid> thread */}
       <div className={styles.historyList}>
         <div className={styles.historySectionTitle}>Mission History</div>
         {missions.map(m => (
-          <div
+          <Link
             key={m.id}
+            to={m.url}
             className={`${styles.historyItem} ${selectedMissionId === m.id ? styles.activeHistoryItem : ''}`}
-            onClick={() => loadHistoricalMission(m)}
           >
             <span className={styles.historyTitle}>{m.title}</span>
             <span className={`${styles.historyStatus} ${styles[`status_${m.status}`]}`}>
               {m.status === 'running' ? '🔄' : m.status === 'success' ? '✅' : m.status === 'failed' ? '❌' : ''}
             </span>
-          </div>
+          </Link>
         ))}
       </div>
 
-      {/* Server config */}
-      <div className={styles.sidebarConfig}>
-        <label>Agent Server URL</label>
-        <input type="text" value={agentUrl} onChange={e => setAgentUrl(e.target.value)} disabled={isNavigating} />
-      </div>
+      {/* Settings — pinned to the bottom, opens the /settings page */}
+      <Link
+        to="/settings"
+        className={`${styles.settingsBtn} ${location.pathname === '/settings' ? styles.activeNavItem : ''}`}
+      >
+        <span className={`${styles.statusDot} ${styles[wsStatus]}`} />
+        <span className={styles.settingsBtnLabel}>⚙️ Settings</span>
+      </Link>
     </aside>
   );
 }

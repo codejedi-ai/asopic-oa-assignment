@@ -1,4 +1,3 @@
-import logo from '@/assets/logo.png';
 import { useAgent } from '@/context/AgentContext';
 import styles from '@/styles/app.module.css';
 
@@ -9,7 +8,6 @@ export default function LiveVisionPage() {
     <section className={styles.pagePanel}>
       <header className={styles.panelHeader}>
         <div className={styles.panelHeaderTitle}>
-          <img src={logo} className={styles.panelLogo} alt="Logo" />
           <h3>🖥️ AGENT BROWSER LIVE VISION</h3>
         </div>
         {isNavigating && <span className={styles.stepBadge}>Step {currentStep ?? '1'}</span>}

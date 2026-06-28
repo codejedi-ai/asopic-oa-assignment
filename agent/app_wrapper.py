@@ -27,13 +27,14 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 import uvicorn
 from pydantic import BaseModel
 
 # Import the Navigator from the existing navigate.py
 from navigate import Navigator
 import config
+import mission_store
 
 
 # ============================================================================
@@ -201,11 +202,19 @@ class InstrumentedNavigator:
         self.navigator = Navigator(vision_model=vision_model)
         self.manager = connection_manager
         self._original_print = print
-    
+        self.logger: Optional[mission_store.MissionLogger] = None
+
     async def _broadcast(self, event_type: EventType, data: Dict[str, Any]):
-        """Helper to broadcast events"""
+        """Helper to broadcast events (and persist them to the mission log)."""
         event = WebSocketEvent(type=event_type, data=data)
         await self.manager.broadcast(event)
+        # Persist every event to the mission log, but never write raw base64
+        # screenshots into events.jsonl (the PNGs are saved as files instead).
+        if self.logger:
+            etype = event_type.value if isinstance(event_type, EventType) else str(event_type)
+            if etype == EventType.SCREENSHOT.value:
+                data = {k: v for k, v in data.items() if k != "screenshot_base64"}
+            self.logger.log_event(etype, data)
     
     async def _capture_print(self, *args, **kwargs):
         """Capture print statements and broadcast as logs"""
@@ -218,21 +227,56 @@ class InstrumentedNavigator:
         await self.navigator.setup()
         await self._broadcast(EventType.CONNECTED, {"status": "Navigator initialized"})
     
-    async def run_heuristic_search(self, start_url: str, repo_name: str, final_goal: str) -> Dict[str, Any]:
+    async def run_heuristic_search(self, start_url: str, repo_name: str, final_goal: str,
+                                   mission_id: str = None) -> Dict[str, Any]:
         """
         Instrumented version of run_heuristic_search that broadcasts events.
         """
+        # Resolve the repository from the goal via web search when it isn't
+        # explicitly provided (e.g. "latest pytorch release" -> pytorch/pytorch),
+        # instead of defaulting to a hardcoded repo.
+        if not repo_name or repo_name in ("unknown",) or "/" not in repo_name:
+            await self._broadcast(EventType.MODEL_INVOKE_START, {
+                "model": "web_search",
+                "purpose": "Finding the GitHub repository for your request"
+            })
+            resolved = await self.navigator.vision.resolve_repository(final_goal)
+            if resolved:
+                repo_name = resolved
+                start_url = f"https://github.com/{resolved}"
+                await self._broadcast(EventType.MODEL_INVOKE_COMPLETE, {
+                    "model": "web_search",
+                    "result": {"reasoning": f"Found repository: {resolved}"}
+                })
+            else:
+                await self._broadcast(EventType.LOG, {
+                    "level": "WARNING",
+                    "message": "Could not resolve a repository from the request; using the provided URL."
+                })
+
+        # Open a persistent mission log under ~/.clio/missions/<id>/
+        if mission_id:
+            try:
+                self.logger = mission_store.MissionLogger(mission_id, repo_name, final_goal, start_url)
+            except Exception as e:
+                print(f"[mission_store] could not open mission log: {e}")
+                self.logger = None
+
         await self._broadcast(EventType.NAVIGATION_START, {
             "start_url": start_url,
             "repo_name": repo_name,
             "goal": final_goal
         })
-        
+
+        # SAS' transition bookkeeping
+        pending_state = None
+        pending_action = None
+
         try:
             # Initialize
             await self.navigator.client.call_tool("navigate_to_url", {"url": start_url})
             current_url = start_url
-            
+
             # RL Initialization
             self.navigator.trajectory = []
             self.navigator.last_state_key = None
@@ -280,7 +324,16 @@ class InstrumentedNavigator:
                     "step": step,
                     "dom_preview": dom_tree[:1000] if dom_tree else ""
                 })
-                
+
+                # Persist this step's state S = (screenshot id, url, DOM) and close
+                # out any pending transition from the previous action: S, A -> S'.
+                current_state = None
+                if self.logger:
+                    current_state = self.logger.save_state(step, current_url, screenshot_data, dom_tree)
+                    if pending_state is not None and pending_action is not None:
+                        self.logger.record_transition(pending_state, pending_action, current_state)
+                        pending_state, pending_action = None, None
+
                 # 2. Check Goal State
                 await self._broadcast(EventType.GOAL_CHECK, {
                     "step": step,
@@ -333,7 +386,12 @@ class InstrumentedNavigator:
                         "result": data,
                         "total_cost": self.navigator.cost_manager.total_cost
                     })
-                    
+
+                    if self.logger:
+                        if pending_state is not None and pending_action is not None and current_state is not None:
+                            self.logger.record_transition(pending_state, pending_action, current_state, reward=1.0)
+                        self.logger.finish("success", data)
+
                     return data
                 
                 # 3. Lesser A* Search
@@ -386,71 +444,65 @@ class InstrumentedNavigator:
                 if score > 0.5:
                     target_href = best_node.get('url', '')
                     element_tag = best_node.get('tag', '').lower()
-                    
+                    is_nav = bool(target_href and target_href.startswith(('http', '/')))
+
+                    if not is_nav and element_tag not in ('button', 'input', 'summary', 'a'):
+                        await self._broadcast(EventType.LOG, {
+                            "level": "WARNING",
+                            "message": f"Skipping non-clickable element: {element_tag}"
+                        })
+                        continue
+
+                    # The browser is a single action tool: build the JSON action
+                    # (reproducible: which element, on which page) and hand it over.
+                    action_json = {
+                        "type": "navigate" if is_nav else "click",
+                        "selector": best_node.get("selector", ""),
+                        "text": best_node.get("text", "")[:120],
+                        "tag": element_tag,
+                        "url": target_href,
+                        "page_url": current_url,
+                        "score": score,
+                    }
+                    if self.logger and current_state is not None:
+                        pending_state = current_state
+                        pending_action = action_json
+
                     await self._broadcast(EventType.ACTION_EXECUTE, {
                         "step": step,
-                        "action_type": "navigate" if target_href and target_href.startswith(('http', '/')) else "click",
+                        "action_type": action_json["type"],
                         "target": best_node.get('text', '')[:50],
                         "tag": element_tag,
                         "score": score
                     })
-                    
-                    try:
-                        if target_href and target_href.startswith(('http', '/')):
-                            full_url = target_href if target_href.startswith('http') else f"https://github.com{target_href}"
-                            action_key = f"navigate:{best_node['text'][:50]}"
-                            self.navigator.trajectory.append({"state": self.navigator.last_state_key, "action": action_key})
-                            
-                            self.navigator.cost_manager.add_cost("navigate", f"Navigating to {full_url}")
-                            await self.navigator.client.call_tool("navigate_to_url", {"url": full_url})
-                            
-                            await self._broadcast(EventType.ACTION_RESULT, {
-                                "step": step,
-                                "success": True,
-                                "action": "navigate",
-                                "url": full_url
-                            })
-                            
-                        elif element_tag in ('button', 'input', 'summary'):
-                            action_key = f"click:{best_node['text'][:50]}"
-                            self.navigator.trajectory.append({"state": self.navigator.last_state_key, "action": action_key})
-                            
-                            self.navigator.cost_manager.add_cost("click", f"Clicking button {best_node['text']}")
-                            
-                            if best_node.get("selector") and len(best_node["selector"]) > 5:
-                                result = await self.navigator.client.call_tool("click_button", {"selector": best_node["selector"]})
-                            else:
-                                result = await self.navigator.client.call_tool("click_button", {"selector": f"text={best_node['text']}"})
-                            
-                            if result.get("status") == "error":
-                                await self._broadcast(EventType.ACTION_RESULT, {
-                                    "step": step,
-                                    "success": False,
-                                    "action": "click",
-                                    "error": result.get('error')
-                                })
-                                continue
-                            
-                            await self._broadcast(EventType.ACTION_RESULT, {
-                                "step": step,
-                                "success": True,
-                                "action": "click"
-                            })
-                        else:
-                            await self._broadcast(EventType.LOG, {
-                                "level": "WARNING",
-                                "message": f"Skipping non-clickable element: {element_tag}"
-                            })
-                            continue
-                            
-                    except Exception as e:
-                        await self._broadcast(EventType.ACTION_RESULT, {
-                            "step": step,
-                            "success": False,
-                            "error": str(e)
+
+                    self.navigator.trajectory.append({
+                        "state": self.navigator.last_state_key,
+                        "action": f"{action_json['type']}:{best_node.get('text', '')[:50]}",
+                    })
+                    self.navigator.cost_manager.add_cost(
+                        action_json["type"], f"{action_json['type']} {best_node.get('text', '')[:50]}")
+
+                    # One tool call: the browser channel performs the action and
+                    # closes unused tabs (saving their URLs for later reference).
+                    result = await self.navigator.client.act(action_json)
+
+                    if result.get("closed_tabs"):
+                        await self._broadcast(EventType.LOG, {
+                            "level": "INFO",
+                            "message": f"Closed {len(result['closed_tabs'])} unused tab(s); URLs saved for reference."
                         })
-                    
-                    await self.navigator.client.call_tool("is_page_loaded", {"timeout_ms": 3000})
+
+                    await self._broadcast(EventType.ACTION_RESULT, {
+                        "step": step,
+                        "success": result.get("ok", False),
+                        "action": action_json["type"],
+                        "error": result.get("error"),
+                        "closed_tabs": result.get("closed_tabs", []),
+                    })
+                    if not result.get("ok"):
+                        continue
+
                     await asyncio.sleep(2)
                 else:
                     await self._broadcast(EventType.LOG, {
@@ -464,14 +516,18 @@ class InstrumentedNavigator:
                 "reason": "Max steps reached",
                 "total_cost": self.navigator.cost_manager.total_cost
             })
+            if self.logger:
+                self.logger.finish("failed", {})
             return {}
-            
+
         except Exception as e:
             error_msg = traceback.format_exc()
             await self._broadcast(EventType.NAVIGATION_ERROR, {
                 "error": str(e),
                 "traceback": error_msg
             })
+            if self.logger:
+                self.logger.finish("failed", {"error": str(e)})
             raise
     
     async def cleanup(self):
@@ -505,6 +561,7 @@ class NavigationRequest(BaseModel):
     url: str
     repo: Optional[str] = None
     goal: Optional[str] = None
+    mission_id: Optional[str] = None
 
 
 class NavigationResponse(BaseModel):
@@ -518,6 +575,19 @@ active_task: Optional[asyncio.Task] = None
 instrumented_navigator: Optional[InstrumentedNavigator] = None
 
 
+async def _cleanup_previous_navigator():
+    """Tear down the previous mission's browser + MCP subprocess before starting a
+    new one, so Chromium/MCP processes don't pile up across missions."""
+    global instrumented_navigator
+    if instrumented_navigator is not None:
+        try:
+            await instrumented_navigator.cleanup()
+        except Exception as e:
+            print(f"[cleanup] previous navigator cleanup failed: {e}")
+        finally:
+            instrumented_navigator = None
+
+
 @app.get("/")
 async def root():
     return {"status": "ok", "service": "Darci Navigation Service", "version": "1.0.0"}
@@ -526,6 +596,42 @@ async def root():
 @app.get("/health")
 async def health():
     return {"status": "healthy", "connections": len(manager.active_connections)}
+
+
+@app.get("/missions")
+async def get_missions():
+    """List all persisted missions (newest first) from ~/.clio/missions."""
+    return {"missions": mission_store.list_missions()}
+
+
+@app.get("/missions/{mission_id}")
+async def get_mission_detail(mission_id: str):
+    """Full mission log: metadata, event stream, and SAS' transitions."""
+    data = mission_store.get_mission(mission_id)
+    if data is None:
+        return JSONResponse(status_code=404, content={"error": "mission not found"})
+    return data
+
+
+@app.get("/missions/{mission_id}/screenshot/{screenshot_id}")
+async def get_mission_screenshot(mission_id: str, screenshot_id: str):
+    """Serve a persisted screenshot PNG for a mission step."""
+    path = mission_store.get_screenshot_path(mission_id, screenshot_id)
+    if path is None:
+        return JSONResponse(status_code=404, content={"error": "screenshot not found"})
+    return FileResponse(str(path), media_type="image/png")
+
+
+class RenameRequest(BaseModel):
+    title: str
+
+
+@app.post("/missions/{mission_id}/rename")
+async def rename_mission_endpoint(mission_id: str, req: RenameRequest):
+    """Rename a persisted mission."""
+    if not mission_store.rename_mission(mission_id, req.title):
+        return JSONResponse(status_code=404, content={"error": "mission not found"})
+    return {"status": "ok"}
 
 
 @app.post("/navigate")
@@ -540,12 +646,13 @@ async def start_navigation(request: NavigationRequest):
         )
     
     try:
+        await _cleanup_previous_navigator()
         instrumented_navigator = InstrumentedNavigator(
             vision_model=config.VISION_MODEL,
             connection_manager=manager
         )
         await instrumented_navigator.setup()
-        
+
         # Determine goal and repo
         repo = request.repo or "unknown"
         goal = request.goal or f"Find latest release for {repo}"
@@ -555,10 +662,11 @@ async def start_navigation(request: NavigationRequest):
             instrumented_navigator.run_heuristic_search(
                 start_url=request.url,
                 repo_name=repo,
-                final_goal=goal
+                final_goal=goal,
+                mission_id=request.mission_id
             )
         )
-        
+
         return {"status": "started", "message": "Navigation started. Connect via WebSocket for updates."}
         
     except Exception as e:
@@ -636,7 +744,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     url = message.get("url", "")
                     repo = message.get("repo", "unknown")
                     goal = message.get("goal", f"Find latest release for {repo}")
-                    
+                    mission_id = message.get("mission_id")
+
                     if not url:
                         await manager.send_to(websocket, WebSocketEvent(
                             type=EventType.ERROR,
@@ -644,7 +753,8 @@ async def websocket_endpoint(websocket: WebSocket):
                         ))
                         continue
                     
-                    # Start navigation
+                    # Start navigation (tear down any previous browser/MCP first)
+                    await _cleanup_previous_navigator()
                     instrumented_navigator = InstrumentedNavigator(
                         vision_model=config.VISION_MODEL,
                         connection_manager=manager
@@ -655,7 +765,8 @@ async def websocket_endpoint(websocket: WebSocket):
                         instrumented_navigator.run_heuristic_search(
                             start_url=url,
                             repo_name=repo,
-                            final_goal=goal
+                            final_goal=goal,
+                            mission_id=mission_id
                         )
                     )
                 

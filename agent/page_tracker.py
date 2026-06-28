@@ -8,9 +8,11 @@ Uses Pydantic v2 for:
 - Immutable configurations
 """
 import hashlib
+import os
 from datetime import datetime
 from typing import Optional, Dict, List, Any
 from pathlib import Path
+import config
 
 from pydantic import BaseModel, Field, computed_field, model_validator
 
@@ -293,7 +295,7 @@ class PageTracker:
     def save(self, path: str = None) -> str:
         """Save session to JSON file."""
         if path is None:
-            path = f"data/session_{self.session.session_id}.json"
+            path = os.path.join(config.DATA_DIR, f"session_{self.session.session_id}.json")
             
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         

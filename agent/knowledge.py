@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from urllib.parse import urlparse
+import config
 
 
 class KnowledgeBase:
@@ -40,8 +41,8 @@ class KnowledgeBase:
         "repo_home": None  # Default for repo root
     }
     
-    def __init__(self, data_dir: str = "data"):
-        self.data_dir = Path(data_dir)
+    def __init__(self, data_dir: str = None):
+        self.data_dir = Path(data_dir or config.DATA_DIR)
         self.data_dir.mkdir(exist_ok=True, parents=True)
         self.q_table_path = self.data_dir / "knowledge_q_table.json"
         self.q_table = self._load_q_table()

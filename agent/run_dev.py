@@ -8,9 +8,8 @@ import sys
 # Set up the path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# Set default environment variables if not present
-if not os.getenv("VISION_MODEL"):
-    os.environ["VISION_MODEL"] = "gpt-4o"
+# Let config.py + .env govern model selection (Claude mode by default).
+# (Previously forced VISION_MODEL=gpt-4o, which overrode Claude mode.)
 
 # Run the app wrapper
 if __name__ == "__main__":

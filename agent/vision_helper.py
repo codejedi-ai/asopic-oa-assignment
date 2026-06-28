@@ -11,26 +11,190 @@ import config
 from pathlib import Path
 from prompts import NavigationPrompts
 
+
+def _extract_json_str(content: str) -> str:
+    """Return just the JSON substring from a model response. Models (especially
+    Haiku) often wrap JSON in ``` fences or add prose before/after it, which
+    breaks a bare json.loads. This strips fences and, if the whole string
+    doesn't parse, extracts the first balanced {...} or [...] block."""
+    if not content:
+        return content
+    s = content.replace('```json', '').replace('```', '').strip()
+    try:
+        json.loads(s)
+        return s  # already clean
+    except Exception:
+        pass
+    start = next((i for i, c in enumerate(s) if c in '{['), None)
+    if start is None:
+        return s
+    opener = s[start]
+    closer = '}' if opener == '{' else ']'
+    depth = 0
+    in_str = False
+    esc = False
+    for j in range(start, len(s)):
+        c = s[j]
+        if in_str:
+            if esc:
+                esc = False
+            elif c == '\\':
+                esc = True
+            elif c == '"':
+                in_str = False
+        else:
+            if c == '"':
+                in_str = True
+            elif c == opener:
+                depth += 1
+            elif c == closer:
+                depth -= 1
+                if depth == 0:
+                    return s[start:j + 1]
+    return s
+
+
+class _ClaudeClient:
+    """Thin wrapper around AsyncAnthropic that drops sampling params
+    (temperature/top_p/top_k) before calling messages.create. Current Claude
+    models (Opus 4.7+/4.8, Fable 5) reject these with a 400, but the agent's
+    call sites pass temperature=0.1 throughout. Stripping here keeps every
+    Claude call valid without touching each site."""
+
+    class _Messages:
+        def __init__(self, inner):
+            self._inner = inner
+
+        async def create(self, **kwargs):
+            for param in ("temperature", "top_p", "top_k"):
+                kwargs.pop(param, None)
+            return await self._inner.messages.create(**kwargs)
+
+    def __init__(self, inner):
+        self._inner = inner
+        self.messages = _ClaudeClient._Messages(inner)
+
+
 class VisionAssistant:
     def __init__(self, vision_model: str = None):
         if vision_model:
             config.VISION_MODEL = vision_model
             
-        self.openai_client = AsyncOpenAI(api_key=config.OPENAI_API_KEY)
+        # OpenAI client is optional — only needed if a GPT model is configured for
+        # the Eyes. Constructing it without a key raises, so guard it.
+        if config.OPENAI_API_KEY:
+            self.openai_client = AsyncOpenAI(api_key=config.OPENAI_API_KEY)
+        else:
+            self.openai_client = None
         try:
             from anthropic import AsyncAnthropic
-            self.anthropic_client = AsyncAnthropic(api_key=config.ANTHROPIC_API_KEY)
+            self.anthropic_client = _ClaudeClient(AsyncAnthropic(api_key=config.ANTHROPIC_API_KEY))
         except ImportError:
             self.anthropic_client = None
             print("Anthropic client not initialized (package might be missing)")
             
-        self.strategy_model = config.STRATEGY_MODEL # This is usually Claude
-        self.tagging_model = vision_model if vision_model else config.TAGGING_MODEL # This is the Vision model (GPT-4o)
+        self.strategy_model = config.STRATEGY_MODEL # Brain (Claude)
+        self.tagging_model = vision_model if vision_model else config.TAGGING_MODEL # Eyes (vision)
         self.tagging_model = config.TAGGING_MODEL
         self.max_tokens = 1000
+
+    async def _eyes_describe(self, eyes_prompt: str, screenshot_data: str,
+                             system_text: str = "You are the Eyes of a web navigation system. Describe what you see clearly and concisely.",
+                             max_tokens: int = 500) -> str:
+        """The "Eyes": describe a screenshot. Uses Claude when the vision model is a
+        Claude model (so the agent runs on an Anthropic key alone); otherwise OpenAI."""
+        if "claude" in self.tagging_model and self.anthropic_client:
+            response = await self.anthropic_client.messages.create(
+                model=self.tagging_model,
+                max_tokens=max_tokens,
+                temperature=0.1,
+                system=system_text,
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": screenshot_data}},
+                        {"type": "text", "text": eyes_prompt},
+                    ],
+                }],
+            )
+            return response.content[0].text
+        # Fallback: OpenAI vision
+        response = await self.openai_client.chat.completions.create(
+            model=self.tagging_model,
+            messages=[
+                {"role": "system", "content": system_text},
+                {"role": "user", "content": [
+                    {"type": "text", "text": eyes_prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{screenshot_data}"}},
+                ]},
+            ],
+            max_tokens=max_tokens,
+            temperature=0.1,
+        )
+        return response.choices[0].message.content
         
-    async def get_navigation_instruction(self, screenshot_data: str, 
-                                        current_url: str, 
+    async def resolve_repository(self, goal: str) -> str:
+        """Resolve the canonical GitHub owner/repo for a natural-language goal
+        (e.g. "latest pytorch release" -> "pytorch/pytorch") using Claude + the
+        web_search server tool. Falls back to the model's own knowledge if web
+        search is unavailable."""
+        import re
+        if not self.anthropic_client:
+            return ""
+
+        def _first_repo(text: str) -> str:
+            # GitHub owner: letters/digits/hyphens only (no dots/underscores),
+            # no leading/trailing hyphen. Repo: starts alnum, then allows ._-
+            text = (text or "").strip()
+            owner = r'[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?'
+            repo = r'[A-Za-z0-9][A-Za-z0-9._-]*'
+            # Prefer an explicit github.com/<owner>/<repo> URL
+            m = re.search(rf'github\.com/({owner})/({repo})', text, re.I)
+            if not m:
+                m = re.search(rf'\b({owner})/({repo})\b', text)
+            if not m:
+                return ""
+            owner_s, repo_s = m.group(1), m.group(2).rstrip('.')
+            if owner_s.lower() in ('github', 'www', 'http', 'https'):
+                return ""
+            return f"{owner_s}/{repo_s}"
+
+        system = ("You identify the canonical GitHub repository for a user's request. "
+                  "Respond with ONLY the owner/repo (e.g. 'pytorch/pytorch') — no prose, no URL.")
+
+        # 1) Web search tool
+        try:
+            resp = await self.anthropic_client.messages.create(
+                model=self.strategy_model,
+                max_tokens=400,
+                system=system,
+                tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 3}],
+                messages=[{"role": "user", "content": f"Find the GitHub repository for: {goal}"}],
+            )
+            text = "".join(getattr(b, "text", "") for b in resp.content if getattr(b, "type", "") == "text")
+            repo = _first_repo(text)
+            if repo:
+                print(f"   -> Web search resolved repo: {repo}")
+                return repo
+        except Exception as e:
+            print(f"   -> Web search resolve failed ({e}); falling back to model knowledge")
+
+        # 2) Fallback: model knowledge, no tool
+        try:
+            resp = await self.anthropic_client.messages.create(
+                model=self.strategy_model,
+                max_tokens=100,
+                system=system,
+                messages=[{"role": "user", "content": f"What is the GitHub owner/repo for: {goal}"}],
+            )
+            text = "".join(getattr(b, "text", "") for b in resp.content if getattr(b, "type", "") == "text")
+            return _first_repo(text)
+        except Exception as e:
+            print(f"   -> Model knowledge resolve failed: {e}")
+            return ""
+
+    async def get_navigation_instruction(self, screenshot_data: str,
+                                        current_url: str,
                                         step_name: str,
                                         goal: str = None) -> Optional[Dict[str, Any]]:
         """Get navigation instruction from vision model"""
@@ -97,7 +261,7 @@ class VisionAssistant:
                 content = response.choices[0].message.content
             
             # Clean response (remove markdown code blocks)
-            content = content.replace('```json', '').replace('```', '').strip()
+            content = _extract_json_str(content)
             return json.loads(content)
             
         except Exception as e:
@@ -198,7 +362,7 @@ class VisionAssistant:
                 content = response.choices[0].message.content
             
             # Parse Brain's response
-            content = content.replace('```json', '').replace('```', '').strip()
+            content = _extract_json_str(content)
             scores = json.loads(content)
             
             # Merge scores back into candidates
@@ -296,7 +460,7 @@ Return JSON:
                 )
                 content = response.choices[0].message.content
             
-            content = content.replace('```json', '').replace('```', '').strip()
+            content = _extract_json_str(content)
             result = json.loads(content)
             return result
             
@@ -358,7 +522,7 @@ Return JSON:
                 )
                 content = response.choices[0].message.content
             
-            content = content.replace('```json', '').replace('```', '').strip()
+            content = _extract_json_str(content)
             return json.loads(content)
             
         except Exception as e:
@@ -409,7 +573,7 @@ Return JSON:
                 )
                 content = response.choices[0].message.content
             
-            content = content.replace('```json', '').replace('```', '').strip()
+            content = _extract_json_str(content)
             return json.loads(content)
             
         except Exception as e:
@@ -483,7 +647,7 @@ Return JSON:
                 )
                 content = response.choices[0].message.content
                 
-            content = content.replace('```json', '').replace('```', '').strip()
+            content = _extract_json_str(content)
             plan = json.loads(content)
             return plan.get("steps", [])
             
@@ -505,7 +669,7 @@ Return JSON:
         """
         
         # --- CACHE CHECK ---
-        cache_path = Path("data/prediction_cache.json")
+        cache_path = Path(config.DATA_DIR) / "prediction_cache.json"
         goal_lower = goal.lower()
         
         if cache_path.exists():
@@ -553,7 +717,7 @@ Return JSON:
                 )
                  content = response.choices[0].message.content
 
-            content = content.replace('```json', '').replace('```', '').strip()
+            content = _extract_json_str(content)
             result = json.loads(content)
             
             # --- SAVE TO CACHE ---
@@ -620,21 +784,11 @@ Return JSON:
 - What version/tag information is visible?
 - Is this clearly the latest release page?"""
 
-                response = await self.openai_client.chat.completions.create(
-                    model=self.tagging_model,
-                    messages=[
-                        {"role": "system", "content": "You are the Eyes. Describe what you see."},
-                        {"role": "user", "content": [
-                            {"type": "text", "text": eyes_prompt},
-                            {"type": "image_url", "image_url": {
-                                "url": f"data:image/png;base64,{screenshot_data}"
-                            }}
-                        ]}
-                    ],
+                visual_description = await self._eyes_describe(
+                    eyes_prompt, screenshot_data,
+                    system_text="You are the Eyes. Describe what you see.",
                     max_tokens=300,
-                    temperature=0.1
                 )
-                visual_description = response.choices[0].message.content
             except Exception as e:
                 print(f"   -> Eyes failed: {e}")
                 visual_description = "Visual unavailable"
@@ -665,7 +819,7 @@ Return JSON:
                 )
                 content = response.choices[0].message.content
             
-            content = content.replace('```json', '').replace('```', '').strip()
+            content = _extract_json_str(content)
             result = json.loads(content)
             return result
             
@@ -756,7 +910,7 @@ Return JSON:
                  # Last resort attempt with whatever client exists
                  content = await run_openai_extraction()
                 
-            content = content.replace('```json', '').replace('```', '').strip()
+            content = _extract_json_str(content)
             return json.loads(content)
             
         except Exception as e:

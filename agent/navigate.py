@@ -17,6 +17,7 @@ import config
 import config
 from vision_helper import VisionAssistant
 from knowledge import KnowledgeBase
+from browser_channel import BrowserChannel
 
 # Simple MCP Client for communicating with the server subprocess
 class MCPClient:
@@ -161,13 +162,13 @@ class CostManager:
 
 class Navigator:
     def __init__(self, vision_model: str):
-        self.client = MCPClient(server_script="mcp_server.py")
+        self.client = BrowserChannel()
         self.vision = VisionAssistant(vision_model=vision_model)
         
         # RL Components
         self.cost_manager = CostManager()
         self.brain = KnowledgeBase()
-        self.dom_cache_dir = Path("debug_artifacts/dom_cache")
+        self.dom_cache_dir = Path(config.DEBUG_DIR) / "dom_cache"
         self.dom_cache_dir.mkdir(exist_ok=True, parents=True)
 
     async def setup(self):
@@ -351,7 +352,7 @@ class Navigator:
         
         # Load Element Vocabulary (Font Coefficients)
         try:
-            with open(os.path.join("data", "element_vocab.json"), "r", encoding="utf-8") as f:
+            with open(os.path.join(config.DATA_DIR, "element_vocab.json"), "r", encoding="utf-8") as f:
                 vocab_data = json.load(f)
                 element_map = vocab_data.get("elements", {})
                 default_coef = vocab_data.get("default_coefficient", 1.0)
@@ -464,7 +465,7 @@ async def main():
     parser.add_argument("--repo", help="Repository in format 'owner/repo'")
     parser.add_argument("--url", default=None, help="Starting URL")
     parser.add_argument("--prompt", help="Natural language prompt")
-    parser.add_argument("--output", default=os.path.join("data", "output.json"), help="Output JSON file path")
+    parser.add_argument("--output", default=os.path.join(config.DATA_DIR, "output.json"), help="Output JSON file path")
     parser.add_argument("--vision-model", default=config.VISION_MODEL, help="Vision model to use")
     
     args = parser.parse_args()
